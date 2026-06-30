@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Heart Particles</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      background: #0a0005;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #overlay {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #overlay h1 {
+      font-family: 'Georgia', serif;
+      font-size: clamp(14px, 2vw, 22px);
+      font-style: italic;
+      color: rgba(255, 150, 180, 0.0);
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      animation: fadeIn 3s ease 4s forwards;
+    }
+
+    @keyframes fadeIn {
+      to {
+        color: rgba(255, 150, 180, 0.35);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- SVG caché pour générer le path du coeur -->
+  <svg id="source-svg" viewBox="0 0 200 190" width="200" height="190"
+    style="position:absolute;visibility:hidden;pointer-events:none;">
+    <!--
+      Path mathématique d'un coeur centré sur (100, 95)
+      Basé sur la courbe paramétrique classique
+    -->
+    <path id="heart-path" d="
+      M 100,170
+      C  20,120  10, 60  40, 35
+      C  60, 18  80, 18 100, 40
+      C 120, 18 140, 18 160, 35
+      C 190, 60 180,120 100,170
+      Z
+    " />
+  </svg>
+
+  <div id="overlay">
+    <h1>♥ avec amour ♥</h1>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+  <script>
+    (function () {
+
+      // ── SCÈNE ────────────────────────────────────────────────────────────────
+      const scene = new THREE.Scene();
+      const W = window.innerWidth, H = window.innerHeight;
+      const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 5000);
+      camera.position.set(0, 0, 520);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(W, H);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0x0a0005, 1);
+      document.body.insertBefore(renderer.domElement, document.getElementById('overlay'));
+
+      // ── GÉNÉRATION DES POINTS DU COEUR (paramétrique) ────────────────────────
+      // Formule mathématique exacte du coeur — sans dépendre du SVG getTotalLength
+      // x(t) = 16 sin³(t)
+      // y(t) = 13 cos(t) − 5 cos(2t) − 2 cos(3t) − cos(4t)
+      function heartPoint(t) {
+        const x = 16 * Math.pow(Math.sin(t), 3);
+        const y = 13 * Math.cos(t)
+          - 5 * Math.cos(2 * t)
+          - 2 * Math.cos(3 * t)
+          - Math.cos(4 * t);
+        return { x, y };
+      }
+
+      // ── PARAMÈTRES ───────────────────────────────────────────────────────────
+      const SCALE = 14;      // taille du coeur
+      const N_OUTLINE = 4000;    // particules sur le contour
+      const N_FILL = 8000;    // particules à l'intérieur (remplissage)
+      const TOTAL = N_OUTLINE + N_FILL;
+
+      const SPREAD_XY = 8;       // légère dispersion XY (effet "poudre")
+      const SPREAD_Z = 40;      // dispersion Z (profondeur)
+
+      // ── POSITIONS CIBLES ─────────────────────────────────────────────────────
+      const targetPositions = new Float32Array(TOTAL * 3);
+      const colorsArr = new Float32Array(TOTAL * 3);
+      const vectors = [];   // objets {x,y,z} animés par GSAP
+
+      // -- Contour --
+      for (let i = 0; i < N_OUTLINE; i++) {
+        const t = (i / N_OUTLINE) * Math.PI * 2;
+        const pt = heartPoint(t);
+        const tx = pt.x * SCALE + (Math.random() - 0.5) * SPREAD_XY;
+        const ty = pt.y * SCALE + (Math.random() - 0.5) * SPREAD_XY;
+        const tz = (Math.random() - 0.5) * SPREAD_Z;
+        targetPositions[i * 3] = tx;
+        targetPositions[i * 3 + 1] = ty;
+        targetPositions[i * 3 + 2] = tz;
+      }
+
+      // -- Remplissage (rejection sampling à l'intérieur du coeur) --
+      // On utilise la formule paramétrique inversée : remplissage par déflation radiale
+      let filled = 0;
+      let attempt = 0;
+      while (filled < N_FILL && attempt < N_FILL * 20) {
+        attempt++;
+        // Paramètre aléatoire + rayon réduit pour l'intérieur
+        const t = Math.random() * Math.PI * 2;
+        const r = Math.random();                 // rayon 0→1
+        const pt = heartPoint(t);
+        const tx = pt.x * SCALE * r + (Math.random() - 0.5) * SPREAD_XY;
+        const ty = pt.y * SCALE * r + (Math.random() - 0.5) * SPREAD_XY;
+        const tz = (Math.random() - 0.5) * (SPREAD_Z * 0.5);
+
+        const idx = N_OUTLINE + filled;
+        targetPositions[idx * 3] = tx;
+        targetPositions[idx * 3 + 1] = ty;
+        targetPositions[idx * 3 + 2] = tz;
+        filled++;
+      }
+
+      // ── COULEURS ROSES ───────────────────────────────────────────────────────
+      for (let i = 0; i < TOTAL; i++) {
+        const isOutline = i < N_OUTLINE;
+        // Palette : rose chaud → magenta → blanc nacré
+        const rand = Math.random();
+
+        let r, g, b;
+        if (rand < 0.4) {
+          // Rose vif
+          r = 1.0; g = 0.2 + Math.random() * 0.3; b = 0.4 + Math.random() * 0.2;
+        } else if (rand < 0.7) {
+          // Rose pastel / nacré
+          r = 1.0; g = 0.5 + Math.random() * 0.3; b = 0.6 + Math.random() * 0.3;
+        } else if (rand < 0.9) {
+          // Magenta profond
+          r = 0.9 + Math.random() * 0.1; g = 0.05 + Math.random() * 0.2; b = 0.4 + Math.random() * 0.3;
+        } else {
+          // Blanc lumineux (étincelles)
+          r = 1.0; g = 0.85; b = 0.9;
+        }
+
+        // Contour légèrement plus lumineux
+        if (isOutline) { r = Math.min(1, r * 1.15); g = Math.min(1, g * 1.1); }
+
+        colorsArr[i * 3] = r;
+        colorsArr[i * 3 + 1] = g;
+        colorsArr[i * 3 + 2] = b;
+      }
+
+      // ── GÉOMÉTRIE ────────────────────────────────────────────────────────────
+      const geometry = new THREE.BufferGeometry();
+      const posArr = new Float32Array(TOTAL * 3); // commence à 0,0,0
+
+      geometry.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colorsArr, 3));
+
+      // Taille variable par particule
+      const sizes = new Float32Array(TOTAL);
+      for (let i = 0; i < TOTAL; i++) {
+        sizes[i] = i < N_OUTLINE
+          ? 1.5 + Math.random() * 2.0   // contour plus gros
+          : 0.8 + Math.random() * 1.5;  // remplissage plus fin
+      }
+      geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+
+      // Shader material pour taille variable + douceur
+      // NOTE: "color" est déjà déclaré par Three.js via vertexColors:true — ne pas le redéclarer
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uOpacity: { value: 1.0 }
+        },
+        vertexShader: `
+        attribute float aSize;
+        varying vec3 vColor;
+        uniform float uTime;
+        void main() {
+          vColor = color;           // "color" fourni automatiquement par Three.js (vertexColors)
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          float pulse = 1.0 + 0.08 * sin(uTime * 2.0 + position.x * 0.05);
+          gl_PointSize = aSize * pulse * (300.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+        fragmentShader: `
+        varying vec3 vColor;
+        uniform float uOpacity;
+        void main() {
+          float d = length(gl_PointCoord - vec2(0.5));
+          if (d > 0.5) discard;
+          float alpha = 1.0 - smoothstep(0.2, 0.5, d);
+          gl_FragColor = vec4(vColor, alpha * uOpacity);
+        }
+      `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexColors: true
+      });
+
+      const particles = new THREE.Points(geometry, material);
+      scene.add(particles);
+
+      // ── ANIMATION GSAP ───────────────────────────────────────────────────────
+      const tl = gsap.timeline({ delay: 0.3 });
+
+      for (let i = 0; i < TOTAL; i++) {
+        const v = { x: 0, y: 0, z: 0 };
+        vectors.push(v);
+
+        tl.to(v, {
+          x: targetPositions[i * 3],
+          y: targetPositions[i * 3 + 1],
+          z: targetPositions[i * 3 + 2],
+          ease: 'power3.out',
+          duration: gsap.utils.random(1.5, 4.0)
+        }, i * 0.00015);   // décalage très faible → explosion dense
+      }
+
+      // ── BOUCLE DE RENDU ──────────────────────────────────────────────────────
+      const clock = new THREE.Clock();
+      let mouseX = 0, mouseY = 0;
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        const elapsed = clock.getElapsedTime();
+        material.uniforms.uTime.value = elapsed;
+
+        // Synchro GSAP → Three.js
+        const pos = geometry.attributes.position.array;
+        for (let i = 0; i < TOTAL; i++) {
+          pos[i * 3] = vectors[i].x;
+          pos[i * 3 + 1] = vectors[i].y;
+          pos[i * 3 + 2] = vectors[i].z;
+        }
+        geometry.attributes.position.needsUpdate = true;
+
+        // Rotation douce + interaction souris
+        particles.rotation.y += 0.0012;
+        particles.rotation.x = mouseY * 0.25;
+
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      // ── SOURIS ───────────────────────────────────────────────────────────────
+      document.addEventListener('mousemove', (e) => {
+        mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+        mouseY = (e.clientY / window.innerHeight - 0.5) * 0.6;
+        gsap.to(particles.rotation, {
+          y: mouseX * 0.8,
+          duration: 1.8,
+          ease: 'power2.out'
+        });
+      });
+
+      // ── RESIZE ───────────────────────────────────────────────────────────────
+      window.addEventListener('resize', () => {
+        const w = window.innerWidth, h = window.innerHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+    })();
+  </script>
+</body>
+
+</html>
